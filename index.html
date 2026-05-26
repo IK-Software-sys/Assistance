@@ -3,256 +3,341 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>3D Assistant - Auto-Centered</title>
+    <title>Jelly 3D Viewer & Interactor</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: sans-serif; }
-        canvas { display: block; width: 100vw; height: 100vh; }
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #1a1a2e;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
         #ui-container {
             position: absolute;
-            bottom: 20px;
+            bottom: 30px;
             left: 50%;
             transform: translateX(-50%);
-            display: flex;
-            gap: 15px;
             z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            width: 90%;
+            max-width: 400px;
         }
-        button {
-            padding: 12px 24px;
-            font-size: 14px;
-            font-weight: bold;
+
+        .btn {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.25);
             color: white;
-            background: #222;
-            border: 2px solid #555;
-            border-radius: 8px;
+            padding: 15px 32px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 50px;
             cursor: pointer;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-            transition: all 0.2s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            transition: all 0.3s ease;
+            width: 100%;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
-        button:active { transform: scale(0.95); }
-        #interact-btn.active-mode { background: #ff4757; border-color: #ff6b81; }
-        #control-mode-btn { background: #007bff; border-color: #00a8ff; }
+
+        .btn.active {
+            background: #ff2a74;
+            border-color: #ff6699;
+            box-shadow: 0 0 20px rgba(255, 42, 116, 0.6);
+        }
+
+        #status-text {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            pointer-events: none;
+            text-align: center;
+        }
+
+        #loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #1a1a2e;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 20px;
+            transition: opacity 0.5s ease;
+        }
     </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 </head>
 <body>
 
+    <div id="loading">
+        <div id="loading-text">Loading Jelly Model...</div>
+    </div>
+    
+    <div id="canvas-container"></div>
+
     <div id="ui-container">
-        <button id="interact-btn">Enable Joint Editing</button>
-        <button id="control-mode-btn" style="display:none;">Mode: Rotate</button>
+        <div id="status-text">Mode: View & Rotate</div>
+        <button id="interact-btn" class="btn">Interact Mode: OFF</button>
     </div>
 
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/"
-            }
-        }
-    </script>
-
-    <script type="module">
-        import * as THREE from 'three';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { TransformControls } from 'three/addons/controls/TransformControls.js';
-
-        // --- Scene & Renderer ---
+    <script>
+        // --- Scene Setup ---
+        const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a1a);
-
-        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 1000);
+        
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        // Default camera placement (will readjust once model loads)
         camera.position.set(0, 2, 5);
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.shadowMap.enabled = true;
-        document.body.appendChild(renderer.domElement);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.4;
+        container.appendChild(renderer.domElement);
+
+        // --- Diagnostics: Visual Floor Grid ---
+        // If you see this grid but no jelly, your file path 'Jel.glb' is incorrect or failing to load.
+        const gridHelper = new THREE.GridHelper(10, 10, 0xff2a74, 0x444466);
+        gridHelper.position.y = -1;
+        scene.add(gridHelper);
 
         // --- Lighting ---
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
         scene.add(ambientLight);
-        
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
         dirLight.position.set(5, 10, 7);
         scene.add(dirLight);
 
+        const dirLight2 = new THREE.DirectionalLight(0x00aaff, 0.5);
+        dirLight2.position.set(-5, 5, -5);
+        scene.add(dirLight2);
+
         // --- Controls ---
-        const orbit = new OrbitControls(camera, renderer.domElement);
-        orbit.enableDamping = true;
-        orbit.dampingFactor = 0.05;
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.target.set(0, 0, 0);
 
-        const transformControl = new TransformControls(camera, renderer.domElement);
-        transformControl.setMode('rotate'); // Default editing mode
-        transformControl.addEventListener('dragging-changed', (e) => orbit.enabled = !e.value);
-        scene.add(transformControl);
-
-        // --- State Variables ---
-        let model, skeleton;
-        const boneHelpers = [];
-        const physicsBones = []; 
+        // --- Physics State ---
+        let jellyMesh = null;
+        let originalPositions = null;
+        let currentPositions = null;
+        let velocities = null;
         let isInteractMode = false;
+        let isPointerDown = false;
 
         const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2();
+        const pointer = new THREE.Vector2();
 
-        // --- Load Model & Auto-Center Engine ---
-        const loader = new GLTFLoader();
-        loader.load('assis.glb', (gltf) => {
-            model = gltf.scene;
-            scene.add(model);
-
-            // 1. Calculate Bounding Box of your specific model
-            const box = new THREE.Box3().setFromObject(model);
-            const center = box.getCenter(new THREE.Vector3());
-            const size = box.getSize(new THREE.Vector3());
-
-            // 2. Adjust Camera & Orbit Targets dynamically based on size
-            const maxDim = Math.max(size.x, size.y, size.z);
-            const fov = camera.fov * (Math.PI / 180);
-            let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+        // --- Automatic Centering & Scaling Loader ---
+        const loader = new THREE.GLTFLoader();
+        
+        loader.load('./Jel.glb', function (gltf) {
+            const model = gltf.scene;
             
-            cameraZ *= 1.3; // Add padding so it's beautifully framed
-            camera.position.set(center.x, center.y, center.z + cameraZ);
-            camera.lookAt(center);
-            
-            orbit.target.copy(center);
-            orbit.update();
-
-            // 3. Dynamic Floor Grid based on model size
-            const gridHelper = new THREE.GridHelper(maxDim * 4, 20, 0x444444, 0x222222);
-            gridHelper.position.y = box.min.y; // Place grid right under her feet
-            scene.add(gridHelper);
-
-            // Update Directional Light target to the model
-            dirLight.position.set(center.x + maxDim, center.y + maxDim, center.z + maxDim);
-            dirLight.lookAt(center);
-
-            // 4. Process Bones & Setup UI Helpers
+            // 1. Force find the internal Mesh for physics
             model.traverse((child) => {
-                if (child.isSkinnedMesh) {
-                    skeleton = child.skeleton;
-                    // Pass maxDim to dynamically size selection handles
-                    setupBoneHelpers(skeleton, maxDim);
-                }
-                if (child.isBone) {
-                    const name = child.name.toLowerCase();
-                    if (name.includes('hair') || name.includes('breast') || name.includes('jiggle') || name.includes('cloth')) {
-                        physicsBones.push({
-                            bone: child,
-                            baseRotation: child.rotation.clone(),
-                            stiffness: 0.1,
-                            speed: 3 + Math.random() * 2
-                        });
+                if (child.isMesh && !jellyMesh) {
+                    jellyMesh = child;
+                    jellyMesh.geometry = jellyMesh.geometry.clone(); // Isolate geometry
+                    
+                    const posAttr = jellyMesh.geometry.attributes.position;
+                    originalPositions = posAttr.array.slice(); 
+                    currentPositions = posAttr.array;          
+                    velocities = new Float32Array(posAttr.count * 3); 
+
+                    if(jellyMesh.material) {
+                        jellyMesh.material.roughness = 0.1;
+                        jellyMesh.material.metalness = 0.1;
+                        jellyMesh.material.side = THREE.DoubleSide; // Fixes inside-out inverted models
                     }
                 }
             });
 
-        }, undefined, (error) => {
-            console.error("Loading crashed:", error);
-            alert("Error loading 'assis.glb'. Make sure it's in the same folder and you're using a local development server.");
+            // 2. AUTOMATIC CENTERING AND RESCALING MATH
+            const box = new THREE.Box3().setFromObject(model);
+            const size = box.getSize(new THREE.Vector3());
+            const center = box.getCenter(new THREE.Vector3());
+
+            // Rescale the model dynamically so its largest dimension is exactly 2 units wide
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const scaleFactor = 2 / maxDim;
+            model.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+            // Recalculate bounding box at new scale to offset it directly into the absolute center (0,0,0)
+            const updatedBox = new THREE.Box3().setFromObject(model);
+            const updatedCenter = updatedBox.getCenter(new THREE.Vector3());
+            model.position.sub(updatedCenter); 
+
+            scene.add(model);
+            
+            // Position camera looking comfortably down at our newly normalized center
+            camera.position.set(0, 1.5, 4);
+            controls.target.set(0, 0, 0);
+            controls.update();
+
+            // Clear loading panel
+            document.getElementById('loading').style.opacity = 0;
+            setTimeout(() => document.getElementById('loading').style.display = 'none', 500);
+
+        }, function (xhr) {
+            // Loading Progress
+            if(xhr.total > 0) {
+                const percent = Math.round((xhr.loaded / xhr.total) * 100);
+                document.getElementById('loading-text').innerText = `Loading: ${percent}%`;
+            }
+        }, function (error) {
+            console.error(error);
+            document.getElementById('loading-text').innerHTML = 
+                `<span style="color: #ff2a74;">Error loading 'Jel.glb'</span><br>
+                 <small style="font-size:14px; color:aaa;">Check if file name matches capitalization exactly.</small>`;
         });
 
-        // --- Dynamic Bone Joint Handles ---
-        function setupBoneHelpers(skeleton, modelSize) {
-            // Dynamic scale: Joint spheres will always be 1.5% of total model size
-            const sphereRadius = modelSize * 0.015; 
-            const sphereGeo = new THREE.SphereGeometry(sphereRadius, 16, 16);
-            const sphereMat = new THREE.MeshBasicMaterial({ 
-                color: 0x00ffcc, 
-                wireframe: true, 
-                transparent: true, 
-                opacity: 0.6 
-            });
-
-            skeleton.bones.forEach(bone => {
-                const helper = new THREE.Mesh(sphereGeo, sphereMat);
-                helper.visible = false; // Hidden until editing mode is turned on
-                helper.userData.isBoneHelper = true;
-                helper.userData.targetBone = bone;
-                bone.add(helper);
-                boneHelpers.push(helper);
-            });
-        }
-
-        // --- UI Click Logic ---
+        // --- UI Interactions ---
         const interactBtn = document.getElementById('interact-btn');
-        const modeBtn = document.getElementById('control-mode-btn');
+        const statusText = document.getElementById('status-text');
 
         interactBtn.addEventListener('click', () => {
             isInteractMode = !isInteractMode;
-            interactBtn.classList.toggle('active-mode');
-            interactBtn.innerText = isInteractMode ? "Disable Joint Editing" : "Enable Joint Editing";
-            modeBtn.style.display = isInteractMode ? "block" : "none";
-            
-            boneHelpers.forEach(h => h.visible = isInteractMode);
-            if (!isInteractMode) transformControl.detach();
-        });
-
-        modeBtn.addEventListener('click', () => {
-            const currentMode = transformControl.getMode();
-            if (currentMode === 'rotate') {
-                transformControl.setMode('translate');
-                modeBtn.innerText = "Mode: Translate";
+            if (isInteractMode) {
+                interactBtn.innerText = "Interact Mode: ON";
+                interactBtn.classList.add('active');
+                statusText.innerText = "Action: Drag/Touch the jelly directly to squish it!";
+                controls.enabled = false; 
             } else {
-                transformControl.setMode('rotate');
-                modeBtn.innerText = "Mode: Rotate";
+                interactBtn.innerText = "Interact Mode: OFF";
+                interactBtn.classList.remove('active');
+                statusText.innerText = "Mode: View & Rotate";
+                controls.enabled = true;  
             }
         });
 
-        // --- Raycasting Selection ---
-        window.addEventListener('pointerdown', (event) => {
-            if (!isInteractMode || transformControl.dragging) return;
+        // --- Touch Inputs ---
+        function updatePointer(event) {
+            let clientX = event.clientX;
+            let clientY = event.clientY;
+            if (event.touches && event.touches.length > 0) {
+                clientX = event.touches[0].clientX;
+                clientY = event.touches[0].clientY;
+            }
+            pointer.x = (clientX / window.innerWidth) * 2 - 1;
+            pointer.y = -(clientY / window.innerHeight) * 2 + 1;
+        }
 
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        window.addEventListener('pointerdown', (e) => {
+            isPointerDown = true;
+            updatePointer(e);
+            if(isInteractMode) deformJelly();
+        });
 
-            raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObjects(boneHelpers);
+        window.addEventListener('pointermove', (e) => {
+            updatePointer(e);
+            if (isInteractMode && isPointerDown) deformJelly();
+        });
+
+        window.addEventListener('pointerup', () => { isPointerDown = false; });
+        window.addEventListener('touchmove', (e) => { if(isInteractMode) e.preventDefault(); }, { passive: false });
+
+        // --- Jelly Physics Deformation ---
+        function deformJelly() {
+            if (!jellyMesh || !currentPositions) return;
+
+            raycaster.setFromCamera(pointer, camera);
+            const intersects = raycaster.intersectObject(jellyMesh);
 
             if (intersects.length > 0) {
-                const selectedBone = intersects[0].object.userData.targetBone;
-                transformControl.attach(selectedBone);
-            } else {
-                // If clicked off a bone helper, check if user hit the gizmo itself
-                const hitsGizmo = raycaster.intersectObjects(transformControl.children, true);
-                if (hitsGizmo.length === 0) {
-                    transformControl.detach();
+                const hitPoint = intersects[0].point;
+                const localHitPoint = jellyMesh.worldToLocal(hitPoint.clone());
+
+                // Proportional to normalized scale size
+                const radius = 0.5;      
+                const strength = 0.3;    
+
+                for (let i = 0; i < currentPositions.length / 3; i++) {
+                    const idx = i * 3;
+                    
+                    const dx = currentPositions[idx] - localHitPoint.x;
+                    const dy = currentPositions[idx + 1] - localHitPoint.y;
+                    const dz = currentPositions[idx + 2] - localHitPoint.z;
+                    const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+                    if (distance < radius) {
+                        const falloff = (1 - distance / radius) * strength;
+                        velocities[idx] += dx * falloff;
+                        velocities[idx + 1] += dy * falloff;
+                        velocities[idx + 2] += dz * falloff;
+                    }
                 }
             }
-        });
+        }
 
-        // --- Window Layout Adjustments ---
+        // --- Frame Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (jellyMesh && originalPositions) {
+                const posAttr = jellyMesh.geometry.attributes.position;
+                const stiffness = 0.15;  
+                const damping = 0.80;    
+
+                for (let i = 0; i < posAttr.count; i++) {
+                    const idx = i * 3;
+
+                    let fx = (originalPositions[idx] - currentPositions[idx]) * stiffness;
+                    let fy = (originalPositions[idx + 1] - currentPositions[idx + 1]) * stiffness;
+                    let fz = (originalPositions[idx + 2] - currentPositions[idx + 2]) * stiffness;
+
+                    velocities[idx] = (velocities[idx] + fx) * damping;
+                    velocities[idx + 1] = (velocities[idx + 1] + fy) * damping;
+                    velocities[idx + 2] = (velocities[idx + 2] + fz) * damping;
+
+                    currentPositions[idx] += velocities[idx];
+                    currentPositions[idx + 1] += velocities[idx + 1];
+                    currentPositions[idx + 2] += velocities[idx + 2];
+                }
+                
+                posAttr.needsUpdate = true;
+                jellyMesh.geometry.computeVertexNormals();
+            }
+
+            if (!isInteractMode) controls.update();
+            renderer.render(scene, camera);
+        }
+
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
-
-        // --- Render Loop & Math Physics ---
-        const clock = new THREE.Clock();
-
-        function animate() {
-            requestAnimationFrame(animate);
-            
-            const time = clock.getElapsedTime();
-            orbit.update();
-
-            // Math-driven Procedural Jiggle / Wave Physics
-            physicsBones.forEach(pb => {
-                // Skips processing if the user is actively manipulating this specific joint
-                if (transformControl.object === pb.bone) return; 
-
-                // Elegant subtle idle physics (wind/breathing sway simulation)
-                const waveX = Math.sin(time * pb.speed) * 0.03;
-                const waveZ = Math.cos(time * (pb.speed * 0.9)) * 0.03;
-
-                // Smoothly spring back/interpolate towards base orientation
-                pb.bone.rotation.x += (pb.baseRotation.x + waveX - pb.bone.rotation.x) * pb.stiffness;
-                pb.bone.rotation.z += (pb.baseRotation.z + waveZ - pb.bone.rotation.z) * pb.stiffness;
-            });
-
-            renderer.render(scene, camera);
-        }
 
         animate();
     </script>
