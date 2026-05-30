@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Jelly 3D Viewer & Interactor</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; padding: 0; overflow: hidden;
+            background: #0a0a14;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            user-select: none; -webkit-user-select: none; color: #fff;
+        }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+
+        #mode-dock {
+            position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+            z-index: 10; display: flex; gap: 8px;
+            background: rgba(12, 12, 28, 0.75); backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 50px;
+            padding: 6px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+        .mode-btn {
+            background: transparent; border: none; color: rgba(255,255,255,0.55);
+            padding: 10px 18px; font-size: 12px; font-weight: 600; border-radius: 50px;
+            cursor: pointer; transition: all 0.25s ease;
+            text-transform: uppercase; letter-spacing: 0.5px;
+            display: flex; align-items: center; gap: 5px; white-space: nowrap;
+        }
+        .mode-btn:hover { color: #fff; background: rgba(255,255,255,0.06); }
+        .mode-btn.active {
+            background: rgba(255, 42, 116, 0.25); color: #ff85a7;
+            box-shadow: 0 0 16px rgba(255,42,116,0.2), inset 0 0 10px rgba(255,42,116,0.08);
+            border: 1px solid rgba(255,42,116,0.35);
+        }
+
+        #status-pill {
+            position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+            z-index: 10; background: rgba(10,10,24,0.7); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.08); border-radius: 50px;
+            padding: 7px 18px; font-size: 11px; color: rgba(255,255,255,0.65);
+            letter-spacing: 0.5px; pointer-events: none; transition: all 0.3s;
+        }
+
+        #inspector {
+            position: absolute; top: 16px; right: 16px; width: 260px;
+            background: rgba(12, 12, 28, 0.92); backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 18px;
+            padding: 16px; z-index: 20; box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+            transform: translateX(120%); opacity: 0;
+            transition: transform 0.4s cubic-bezier(0.22,1,0.36,1), opacity 0.3s;
+            display: flex; flex-direction: column; gap: 12px;
+            max-height: 88vh; overflow-y: auto;
+        }
+        #inspector.active { transform: translateX(0); opacity: 1; }
+        #inspector::-webkit-scrollbar { width: 5px; }
+        #inspector::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+
+        .insp-header {
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 10px;
+        }
+        .insp-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #ff85a7; }
+        .insp-close { background: none; border: none; color: rgba(255,255,255,0.5); font-size: 20px; cursor: pointer; padding: 0 4px; line-height: 1; }
+        .insp-close:hover { color: #fff; }
+        .insp-body { display: flex; flex-direction: column; gap: 14px; }
+        .insp-section { display: none; }
+        .insp-section.visible { display: flex; flex-direction: column; gap: 10px; }
+        .insp-label { font-size: 11px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.8px; display: flex; justify-content: space-between; }
+        .insp-name { font-size: 15px; font-weight: 600; color: #fff; word-break: break-word; }
+        .pill-tag { font-size: 10px; padding: 3px 8px; border-radius: 20px; background: rgba(255,255,255,0.1); color: #ccc; text-transform: uppercase; }
+        .pill-tag.breast { background: rgba(255, 42, 116, 0.25); color: #ff85a7; }
+
+        .slider-group { display: flex; flex-direction: column; gap: 6px; }
+        .slider-group label { font-size: 11px; color: rgba(255,255,255,0.6); display: flex; justify-content: space-between; }
+        .slider-group input[type=range] {
+            width: 100%; -webkit-appearance: none; height: 4px; border-radius: 2px;
+            background: rgba(255,255,255,0.12); outline: none;
+        }
+        .slider-group input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+            background: #ff2a74; cursor: pointer; box-shadow: 0 0 10px rgba(255,42,116,0.5);
+            transition: transform 0.1s;
+        }
+        .slider-group input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+        .insp-btn {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+            color: #fff; padding: 8px 0; border-radius: 10px; font-size: 12px;
+            cursor: pointer; transition: all 0.2s; width: 100%;
+        }
+        .insp-btn:hover { background: rgba(255,255,255,0.18); }
+        .insp-btn.primary { background: rgba(255, 42, 116, 0.25); border-color: rgba(255,42,116,0.4); }
+        .insp-btn.primary:hover { background: rgba(255, 42, 116, 0.4); }
+
+        .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; }
+        .zone-toggle {
+            appearance: none; width: 40px; height: 22px; background: rgba(255,255,255,0.15);
+            border-radius: 11px; position: relative; cursor: pointer; outline: none; transition: background 0.2s;
+        }
+        .zone-toggle::after {
+            content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+            background: #fff; border-radius: 50%; transition: transform 0.2s cubic-bezier(0.22,1,0.36,1);
+        }
+        .zone-toggle:checked { background: #ff2a74; }
+        .zone-toggle:checked::after { transform: translateX(18px); }
+
+        #loading {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: #0a0a14; z-index: 100; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; color: white; font-size: 18px;
+            transition: opacity 0.5s ease;
+        }
+        .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,42,116,0.2); border-top-color: #ff2a74; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #video-preview {
+            position: absolute; bottom: 80px; left: 16px; width: 140px; height: 105px;
+            border-radius: 12px; border: 2px solid rgba(255,42,116,0.5); z-index: 50;
+            object-fit: cover; display: none; background: #000;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+        }
+        #camera-btn {
+            position: absolute; top: 16px; left: 16px; z-index: 10;
+            background: rgba(12,12,28,0.7); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 50px;
+            padding: 8px 16px; color: #fff; font-size: 12px; cursor: pointer;
+            display: flex; align-items: center; gap: 6px; transition: all 0.2s;
+        }
+        #camera-btn:hover { background: rgba(255,42,116,0.3); border-color: rgba(255,42,116,0.5); }
+        #camera-btn.recording { background: rgba(255,42,116,0.4); border-color: #ff2a74; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,42,116,0.4); } 50% { box-shadow: 0 0 0 8px rgba(255,42,116,0); } }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div id="loading"><div class="spinner"></div><div id="loading-text">Loading Model...</div></div>
+    <div id="canvas-container"></div>
+    <div id="status-pill">View Mode</div>
+    <button id="camera-btn">📷 Track Pose</button>
+    <video id="video-preview" autoplay playsinline muted></video>
+    <div id="mode-dock">
+        <button class="mode-btn active" data-mode="view">👁 View</button>
+        <button class="mode-btn" data-mode="squish">✋ Squish</button>
+        <button class="mode-btn" data-mode="pose">🦴 Pose</button>
+        <button class="mode-btn" data-mode="zones">💧 Zones</button>
+    </div>
+    <div id="inspector">
+        <div class="insp-header"><span class="insp-title">Inspector</span><button class="insp-close" id="insp-close">×</button></div>
+        <div class="insp-body">
+            <div class="insp-section" id="insp-bone">
+                <div class="insp-row"><span class="insp-name" id="bone-name">Bone</span><span class="pill-tag">Joint</span></div>
+                <div class="slider-group"><label>Rotate X <span id="bone-val-x">0°</span></label><input type="range" id="bone-rot-x" min="-180" max="180" value="0" step="1"></div>
+                <div class="slider-group"><label>Rotate Y <span id="bone-val-y">0°</span></label><input type="range" id="bone-rot-y" min="-180" max="180" value="0" step="1"></div>
+                <div class="slider-group"><label>Rotate Z <span id="bone-val-z">0°</span></label><input type="range" id="bone-rot-z" min="-180" max="180" value="0" step="1"></div>
+                <button class="insp-btn" id="bone-reset-btn">Reset Joint</button>
+                <button class="insp-btn primary" id="pose-reset-all">Reset All Pose</button>
+            </div>
+            <div class="insp-section" id="insp-zone">
+                <div class="insp-row"><span class="insp-name" id="zone-name">Zone</span><span class="pill-tag breast">Breast</span></div>
+                <div class="toggle-row"><span style="font-size:12px">Jiggle Enabled</span><input type="checkbox" class="zone-toggle" id="zone-active-toggle"></div>
+                <div class="slider-group"><label>Stiffness <span id="zone-stiff-val">0.025</span></label><input type="range" id="zone-stiff" min="0.005" max="0.15" value="0.025" step="0.001"></div>
+                <div class="slider-group"><label>Damping <span id="zone-damp-val">0.88</span></label><input type="range" id="zone-damp" min="0.5" max="0.98" value="0.88" step="0.01"></div>
+                <div class="slider-group"><label>Gravity <span id="zone-grav-val">-0.002</span></label><input type="range" id="zone-grav" min="-0.01" max="0.005" value="-0.002" step="0.0001"></div>
+                <button class="insp-btn primary" id="zones-reset-btn">Reset All Zones</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Scene Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a14);
+        scene.fog = new THREE.Fog(0x0a0a14, 8, 25);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 1.8, 4.5);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.3;
+        container.appendChild(renderer.domElement);
+
+        const gridHelper = new THREE.GridHelper(12, 12, 0xff2a74, 0x2a2a4a);
+        gridHelper.position.y = -1.1;
+        scene.add(gridHelper);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        keyLight.position.set(4, 8, 5);
+        keyLight.castShadow = true;
+        keyLight.shadow.mapSize.set(1024,1024);
+        scene.add(keyLight);
+        const fillLight = new THREE.DirectionalLight(0x88ccff, 0.4);
+        fillLight.position.set(-4, 4, -4);
+        scene.add(fillLight);
+        const rimLight = new THREE.SpotLight(0xff2a74, 2.5, 20, Math.PI/4, 0.5, 1);
+        rimLight.position.set(0, 6, -4);
+        rimLight.lookAt(0,0,0);
+        scene.add(rimLight);
+
+        // --- Controls ---
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.06;
+        controls.target.set(0, 0.9, 0);
+        controls.minDistance = 1.5;
+        controls.maxDistance = 10;
+        controls.enablePan = true;
+
+        // --- State ---
+        let currentMode = 'view';
+        let isPointerDown = false;
+        let pointer = new THREE.Vector2();
+        let raycaster = new THREE.Raycaster();
+        let loadedModel = null;
+        let allBones = [];
+        let boneMap = new Map();
+        let originalBoneQuaternions = new Map();
+        let boneUserRotations = new Map(); // uuid -> {x,y,z} degrees
+        let selectedBone = null;
+        let jellyParts = [];
+        let selectedZone = null;
+        let boneHelpers = [];
+        let jiggleHelpers = [];
+        let isTracking = false;
+        let poseDetector = null;
+        let videoElement = document.getElementById('video-preview');
+        let cameraUtils = null;
+        let smoothedLandmarks = null;
+
+        // --- Name Patterns ---
+        const BREAST_PATTERN = /breast|boob|bust|chest|pec|torso_front|mune|nipple/i;
+
+        // --- UI Refs ---
+        const statusPill = document.getElementById('status-pill');
+        const inspector = document.getElementById('inspector');
+        const inspBone = document.getElementById('insp-bone');
+        const inspZone = document.getElementById('insp-zone');
+
+        // --- Mode Switching ---
+        function setMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+            const labels = {
+                view: 'View Mode — Orbit, pinch zoom, two-finger swipe to pan',
+                squish: 'Squish Mode — Click & drag to deform',
+                pose: 'Pose Mode — Click pink joints to rotate bones',
+                zones: 'Zones Mode — Click pink bubbles to configure jiggle'
+            };
+            statusPill.textContent = labels[mode];
+            const showBones = mode === 'pose';
+            const showZones = mode === 'zones';
+            boneHelpers.forEach(h => {
+                h.sphere.visible = showBones;
+                if(h.line) h.line.visible = showBones;
+            });
+            jiggleHelpers.forEach(h => { h.mesh.visible = showZones; });
+            if (mode !== 'pose' && selectedBone) deselectBone();
+            if (mode !== 'zones' && selectedZone) deselectZone();
+            if (mode !== 'pose' && mode !== 'zones') inspector.classList.remove('active');
+            controls.enabled = (mode === 'view' || mode === 'squish' || mode === 'zones');
+        }
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => setMode(btn.dataset.mode));
+        });
+        document.getElementById('insp-close').addEventListener('click', () => {
+            inspector.classList.remove('active');
+            if (selectedBone) deselectBone();
+            if (selectedZone) deselectZone();
+        });
+
+        // --- Two-finger pan fix ---
+        let touchStartCenter = new THREE.Vector2();
+        let touchStartTarget = new THREE.Vector3();
+        let touchStartCam = new THREE.Vector3();
+        let isTwoFinger = false;
+
+        renderer.domElement.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                isTwoFinger = true;
+                controls.enabled = false;
+                touchStartCenter.set(
+                    (e.touches[0].clientX + e.touches[1].clientX) / 2,
+                    (e.touches[0].clientY + e.touches[1].clientY) / 2
+                );
+                touchStartTarget.copy(controls.target);
+                touchStartCam.copy(camera.position);
+            }
+        }, { passive: false });
+
+        renderer.domElement.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2 && isTwoFinger) {
+                e.preventDefault();
+                const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                const dx = (cx - touchStartCenter.x) * 0.008;
+                const dy = (cy - touchStartCenter.y) * 0.008;
+                const panRight = new THREE.Vector3();
+                const panUp = new THREE.Vector3();
+                camera.getWorldDirection(panRight);
+                panRight.cross(camera.up).normalize().multiplyScalar(-dx);
+                panUp.copy(camera.up).normalize().multiplyScalar(dy);
+                const pan = panRight.add(panUp);
+                controls.target.copy(touchStartTarget).sub(pan);
+                camera.position.copy(touchStartCam).sub(pan);
+            }
+        }, { passive: false });
+
+        renderer.domElement.addEventListener('touchend', () => {
+            if (isTwoFinger) {
+                isTwoFinger = false;
+                if (currentMode === 'view') controls.enabled = true;
+            }
+        });
+
+        // --- Loader ---
+        const loader = new THREE.GLTFLoader();
+        loader.load('./Jel.glb', (gltf) => {
+            const model = gltf.scene;
+            loadedModel = model;
+
+            model.traverse((child) => {
+                if (child.isMesh) {
+                    const mesh = child;
+                    mesh.geometry = mesh.geometry.clone();
+                    const posAttr = mesh.geometry.attributes.position;
+                    const originalPositions = posAttr.array.slice();
+                    const velocities = new Float32Array(posAttr.count * 3);
+
+                    if (mesh.material) {
+                        mesh.material = mesh.material.clone();
+                        mesh.material.roughness = 0.3;
+                        mesh.material.metalness = 0.05;
+                        mesh.material.side = THREE.DoubleSide;
+                        if (mesh.material.color) {
+                            mesh.material.emissive = new THREE.Color(0x1a0510);
+                            mesh.material.emissiveIntensity = 0.15;
+                        }
+                    }
+
+                    const box = new THREE.Box3().setFromObject(mesh);
+                    const size = box.getSize(new THREE.Vector3());
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    mesh.geometry.computeBoundingBox();
+                    const lb = mesh.geometry.boundingBox;
+                    const lCenter = new THREE.Vector3().addVectors(lb.min, lb.max).multiplyScalar(0.5);
+                    const deformRadius = Math.max(maxDim * 0.35, 0.15);
+
+                    const meshName = mesh.name.toLowerCase();
+                    const isBreast = BREAST_PATTERN.test(meshName);
+
+                    if (isBreast) {
+                        jellyParts.push({
+                            mesh, originalPositions, currentPositions: posAttr.array,
+                            velocities, deformRadius, active: true,
+                            localCenter: lCenter,
+                            customStiffness: null, customDamping: null, customGravity: null
+                        });
+                    }
+                }
+                if (child.isSkinnedMesh && child.skeleton) {
+                    child.skeleton.bones.forEach(b => {
+                        if (!boneMap.has(b.uuid)) {
+                            boneMap.set(b.uuid, b);
+                            allBones.push(b);
+                        }
+                    });
+                }
+            });
+
+            buildBoneHelpers();
+            buildJiggleHelpers();
+
+            const mbox = new THREE.Box3().setFromObject(model);
+            const msize = mbox.getSize(new THREE.Vector3());
+            const mcenter = mbox.getCenter(new THREE.Vector3());
+            const maxDim = Math.max(msize.x, msize.y, msize.z);
+            const scaleFactor = 2.2 / maxDim;
+            model.scale.setScalar(scaleFactor);
+            const updatedBox = new THREE.Box3().setFromObject(model);
+            const updatedCenter = updatedBox.getCenter(new THREE.Vector3());
+            model.position.sub(updatedCenter);
+            scene.add(model);
+            camera.position.set(0, 1.6, 3.8);
+            controls.target.set(0, 0.9, 0);
+            controls.update();
+
+            document.getElementById('loading').style.opacity = 0;
+            setTimeout(() => document.getElementById('loading').style.display = 'none', 500);
+        }, (xhr) => {
+            if (xhr.total > 0) {
+                document.getElementById('loading-text').textContent = `Loading: ${Math.round((xhr.loaded/xhr.total)*100)}%`;
+            }
+        }, (err) => {
+            console.error(err);
+            document.getElementById('loading-text').innerHTML = `<span style="color:#ff2a74">Error loading 'Jel.glb'</span><br><small>Check file name and path</small>`;
+        });
+
+        // --- Bone Helpers ---
+        function buildBoneHelpers() {
+            if (allBones.length === 0) return;
+            allBones.forEach(bone => {
+                originalBoneQuaternions.set(bone.uuid, bone.quaternion.clone());
+                boneUserRotations.set(bone.uuid, {x:0,y:0,z:0});
+                const sphereGeo = new THREE.SphereGeometry(0.04, 14, 14);
+                const sphereMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false });
+                const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+                sphere.renderOrder = 1000;
+                sphere.userData = { isBoneHelper: true, bone: bone };
+                scene.add(sphere);
+                let line = null;
+                if (bone.parent && boneMap.has(bone.parent.uuid)) {
+                    const lineGeo = new THREE.BufferGeometry();
+                    const positions = new Float32Array(6);
+                    lineGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                    const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, depthTest: false });
+                    line = new THREE.Line(lineGeo, lineMat);
+                    line.renderOrder = 999;
+                    scene.add(line);
+                }
+                boneHelpers.push({ bone, sphere, line });
+            });
+        }
+
+        function updateBoneHelpers() {
+            boneHelpers.forEach(({ bone, sphere, line }) => {
+                const pos = new THREE.Vector3();
+                bone.getWorldPosition(pos);
+                sphere.position.copy(pos);
+                if (line && bone.parent) {
+                    const ppos = new THREE.Vector3();
+                    bone.parent.getWorldPosition(ppos);
+                    const arr = line.geometry.attributes.position.array;
+                    arr[0] = ppos.x; arr[1] = ppos.y; arr[2] = ppos.z;
+                    arr[3] = pos.x; arr[4] = pos.y; arr[5] = pos.z;
+                    line.geometry.attributes.position.needsUpdate = true;
+                }
+            });
+        }
+
+        function deselectBone() {
+            if (!selectedBone) return;
+            const h = boneHelpers.find(b => b.bone === selectedBone);
+            if (h) { h.sphere.material.color.setHex(0xffffff); h.sphere.scale.setScalar(1); }
+            selectedBone = null;
+            inspBone.classList.remove('visible');
+        }
+
+        function selectBone(bone) {
+            deselectBone();
+            deselectZone();
+            selectedBone = bone;
+            const h = boneHelpers.find(b => b.bone === bone);
+            if (h) { h.sphere.material.color.setHex(0xff2a74); h.sphere.scale.setScalar(1.6); }
+            const user = boneUserRotations.get(bone.uuid) || {x:0,y:0,z:0};
+            document.getElementById('bone-name').textContent = bone.name || 'Joint';
+            document.getElementById('bone-rot-x').value = user.x;
+            document.getElementById('bone-rot-y').value = user.y;
+            document.getElementById('bone-rot-z').value = user.z;
+            updateBoneSliderLabels(user.x, user.y, user.z);
+            inspZone.classList.remove('visible');
+            inspBone.classList.add('visible');
+            inspector.classList.add('active');
+        }
+
+        function updateBoneSliderLabels(x,y,z) {
+            document.getElementById('bone-val-x').textContent = x + '°';
+            document.getElementById('bone-val-y').textContent = y + '°';
+            document.getElementById('bone-val-z').textContent = z + '°';
+        }
+
+        function applyBoneRotation() {
+            if (!selectedBone) return;
+            const rx = parseFloat(document.getElementById('bone-rot-x').value);
+            const ry = parseFloat(document.getElementById('bone-rot-y').value);
+            const rz = parseFloat(document.getElementById('bone-rot-z').value);
+            boneUserRotations.set(selectedBone.uuid, {x:rx, y:ry, z:rz});
+            updateBoneSliderLabels(rx, ry, rz);
+            const origQ = originalBoneQuaternions.get(selectedBone.uuid);
+            const euler = new THREE.Euler(rx * Math.PI/180, ry * Math.PI/180, rz * Math.PI/180, selectedBone.rotation.order);
+            const userQ = new THREE.Quaternion().setFromEuler(euler);
+            selectedBone.quaternion.copy(origQ).multiply(userQ);
+            selectedBone.updateMatrixWorld(true);
+        }
+
+        ['bone-rot-x','bone-rot-y','bone-rot-z'].forEach(id => {
+            document.getElementById(id).addEventListener('input', applyBoneRotation);
+        });
+
+        document.getElementById('bone-reset-btn').addEventListener('click', () => {
+            if (!selectedBone) return;
+            boneUserRotations.set(selectedBone.uuid, {x:0,y:0,z:0});
+            ['bone-rot-x','bone-rot-y','bone-rot-z'].forEach(id => document.getElementById(id).value = 0);
+            updateBoneSliderLabels(0,0,0);
+            const origQ = originalBoneQuaternions.get(selectedBone.uuid);
+            selectedBone.quaternion.copy(origQ);
+            selectedBone.updateMatrixWorld(true);
+        });
+
+        document.getElementById('pose-reset-all').addEventListener('click', () => {
+            allBones.forEach(b => {
+                boneUserRotations.set(b.uuid, {x:0,y:0,z:0});
+                const origQ = originalBoneQuaternions.get(b.uuid);
+                if (origQ) b.quaternion.copy(origQ);
+            });
+            if (loadedModel) loadedModel.updateMatrixWorld(true);
+            if (selectedBone) {
+                ['bone-rot-x','bone-rot-y','bone-rot-z'].forEach(id => document.getElementById(id).value = 0);
+                updateBoneSliderLabels(0,0,0);
+            }
+        });
+
+        // --- Jiggle Helpers ---
+        function buildJiggleHelpers() {
+            jellyParts.forEach((part, idx) => {
+                const geo = new THREE.SphereGeometry(Math.max(part.deformRadius * 0.3, 0.05), 16, 16);
+                const mat = new THREE.MeshBasicMaterial({
+                    color: 0xff2a74, transparent: true, opacity: 0.5,
+                    depthTest: false, side: THREE.DoubleSide
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.renderOrder = 990;
+                mesh.userData = { isJiggleHelper: true, partIndex: idx };
+                scene.add(mesh);
+                jiggleHelpers.push({ part, mesh });
+            });
+            if (jellyParts.length === 0) {
+                // Add a fallback helper message area? We'll handle in UI
+            }
+        }
+
+        function updateJiggleHelpers() {
+            jiggleHelpers.forEach(({ part, mesh }) => {
+                const center = part.localCenter.clone();
+                part.mesh.localToWorld(center);
+                mesh.position.copy(center);
+                mesh.material.opacity = part.active ? 0.5 : 0.12;
+                mesh.material.color.setHex(part.active ? 0xff2a74 : 0x555555);
+            });
+        }
+
+        function deselectZone() {
+            if (!selectedZone) return;
+            selectedZone = null;
+            inspZone.classList.remove('visible');
+        }
+
+        function selectZone(part) {
+            deselectBone();
+            deselectZone();
+            selectedZone = part;
+            document.getElementById('zone-name').textContent = part.mesh.name || 'Breast Zone';
+            document.getElementById('zone-active-toggle').checked = part.active;
+            document.getElementById('zone-stiff').value = part.customStiffness ?? 0.025;
+            document.getElementById('zone-damp').value = part.customDamping ?? 0.88;
+            document.getElementById('zone-grav').value = part.customGravity ?? -0.002;
+            updateZoneSliderLabels();
+            inspBone.classList.remove('visible');
+            inspZone.classList.add('visible');
+            inspector.classList.add('active');
+        }
+
+        function updateZoneSliderLabels() {
+            document.getElementById('zone-stiff-val').textContent = parseFloat(document.getElementById('zone-stiff').value).toFixed(3);
+            document.getElementById('zone-damp-val').textContent = parseFloat(document.getElementById('zone-damp').value).toFixed(2);
+            document.getElementById('zone-grav-val').textContent = parseFloat(document.getElementById('zone-grav').value).toFixed(4);
+        }
+
+        function applyZoneSettings() {
+            if (!selectedZone) return;
+            selectedZone.active = document.getElementById('zone-active-toggle').checked;
+            selectedZone.customStiffness = parseFloat(document.getElementById('zone-stiff').value);
+            selectedZone.customDamping = parseFloat(document.getElementById('zone-damp').value);
+            selectedZone.customGravity = parseFloat(document.getElementById('zone-grav').value);
+            updateZoneSliderLabels();
+        }
+
+        ['zone-stiff','zone-damp','zone-grav'].forEach(id => {
+            document.getElementById(id).addEventListener('input', applyZoneSettings);
+        });
+        document.getElementById('zone-active-toggle').addEventListener('change', applyZoneSettings);
+
+        document.getElementById('zones-reset-btn').addEventListener('click', () => {
+            jellyParts.forEach(p => {
+                p.active = true;
+                p.customStiffness = null;
+                p.customDamping = null;
+                p.customGravity = null;
+            });
+            if (selectedZone) {
+                document.getElementById('zone-active-toggle').checked = true;
+                document.getElementById('zone-stiff').value = 0.025;
+                document.getElementById('zone-damp').value = 0.88;
+                document.getElementById('zone-grav').value = -0.002;
+                updateZoneSliderLabels();
+            }
+        });
+
+        // --- Pointer / Raycasting ---
+        function updatePointer(e) {
+            let cx = e.clientX, cy = e.clientY;
+            if (e.touches && e.touches.length > 0) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; }
+            pointer.x = (cx / window.innerWidth) * 2 - 1;
+            pointer.y = -(cy / window.innerHeight) * 2 + 1;
+        }
+
+        function onPointerDown(e) {
+            if (e.target.closest('#mode-dock') || e.target.closest('#inspector') || e.target.closest('#camera-btn')) return;
+            isPointerDown = true;
+            updatePointer(e);
+
+            if (currentMode === 'pose') {
+                raycaster.setFromCamera(pointer, camera);
+                const hits = raycaster.intersectObjects(boneHelpers.map(b => b.sphere));
+                if (hits.length > 0) {
+                    selectBone(hits[0].object.userData.bone);
+                    e.preventDefault();
+                    return;
+                }
+            }
+            if (currentMode === 'zones') {
+                raycaster.setFromCamera(pointer, camera);
+                const hits = raycaster.intersectObjects(jiggleHelpers.map(j => j.mesh));
+                if (hits.length > 0) {
+                    selectZone(jellyParts[hits[0].object.userData.partIndex]);
+                    e.preventDefault();
+                    return;
+                }
+            }
+            if (currentMode === 'squish') {
+                deformJelly();
+            }
+        }
+
+        function onPointerMove(e) {
+            updatePointer(e);
+            if (currentMode === 'squish' && isPointerDown) deformJelly();
+            if (currentMode === 'pose') {
+                raycaster.setFromCamera(pointer, camera);
+                const hits = raycaster.intersectObjects(boneHelpers.map(b => b.sphere));
+                document.body.style.cursor = hits.length > 0 ? 'pointer' : 'default';
+            } else if (currentMode === 'zones') {
+                raycaster.setFromCamera(pointer, camera);
+                const hits = raycaster.intersectObjects(jiggleHelpers.map(j => j.mesh));
+                document.body.style.cursor = hits.length > 0 ? 'pointer' : 'default';
+                jiggleHelpers.forEach(j => j.mesh.scale.setScalar(1));
+                if (hits.length > 0) hits[0].object.scale.setScalar(1.3);
+            } else {
+                document.body.style.cursor = 'default';
+            }
+        }
+
+        window.addEventListener('pointerdown', onPointerDown);
+        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('pointerup', () => isPointerDown = false);
+        window.addEventListener('touchmove', e => { if (currentMode === 'squish' && e.touches.length === 1) e.preventDefault(); }, { passive: false });
+
+        // --- Deformation ---
+        function deformJelly() {
+            if (jellyParts.length === 0) return;
+            raycaster.setFromCamera(pointer, camera);
+            const meshes = jellyParts.map(p => p.mesh);
+            const hits = raycaster.intersectObjects(meshes);
+            if (hits.length > 0) {
+                const hit = hits[0];
+                const targetMesh = hit.object;
+                const localHit = targetMesh.worldToLocal(hit.point.clone());
+                const strength = 0.5;
+                jellyParts.forEach(part => {
+                    if (part.mesh !== targetMesh) return;
+                    const { currentPositions, velocities, deformRadius } = part;
+                    const rSq = deformRadius * deformRadius;
+                    for (let i = 0; i < currentPositions.length / 3; i++) {
+                        const idx = i * 3;
+                        const dx = currentPositions[idx] - localHit.x;
+                        const dy = currentPositions[idx+1] - localHit.y;
+                        const dz = currentPositions[idx+2] - localHit.z;
+                        const distSq = dx*dx + dy*dy + dz*dz;
+                        if (distSq < rSq) {
+                            const dist = Math.sqrt(distSq);
+                            const falloff = (1 - dist / deformRadius) * strength;
+                            velocities[idx] += dx * falloff;
+                            velocities[idx+1] += dy * falloff;
+                            velocities[idx+2] += dz * falloff;
+                        }
+                    }
+                });
+            }
+        }
+
+        // --- MediaPipe Pose Tracking ---
+        const cameraBtn = document.getElementById('camera-btn');
+        const MEDIAPIPE_BONE_MAP = [
+            { regex: /hip|pelvis|root/i, from: 23, to: 24, up: [0,1,0] },
+            { regex: /spine|back|torso|chest/i, from: 11, to: 23, up: [0,0,1] },
+            { regex: /neck/i, from: 0, to: 11, up: [0,0,1] },
+            { regex: /head|skull/i, from: 0, to: 8, up: [0,1,0] },
+            { regex: /shoulder|clavicle.*l|left.*shoulder|arm.*l/i, from: 11, to: 13, side: 'left' },
+            { regex: /upper.*arm|arm.*l|left.*upper/i, from: 11, to: 13, side: 'left' },
+            { regex: /forearm|elbow.*l|left.*elbow|lower.*arm.*l/i, from: 13, to: 15, side: 'left' },
+            { regex: /hand|wrist.*l|left.*wrist|palm.*l/i, from: 15, to: 17, side: 'left' },
+            { regex: /shoulder|clavicle.*r|right.*shoulder|arm.*r/i, from: 12, to: 14, side: 'right' },
+            { regex: /upper.*arm|arm.*r|right.*upper/i, from: 12, to: 14, side: 'right' },
+            { regex: /forearm|elbow.*r|right.*elbow|lower.*arm.*r/i, from: 14, to: 16, side: 'right' },
+            { regex: /hand|wrist.*r|right.*wrist|palm.*r/i, from: 16, to: 18, side: 'right' },
+            { regex: /thigh|upper.*leg|leg.*l|left.*thigh/i, from: 23, to: 25, side: 'left' },
+            { regex: /calf|shin|knee.*l|lower.*leg.*l/i, from: 25, to: 27, side: 'left' },
+            { regex: /foot|ankle.*l|left.*ankle/i, from: 27, to: 31, side: 'left' },
+            { regex: /thigh|upper.*leg|leg.*r|right.*thigh/i, from: 24, to: 26, side: 'right' },
+            { regex: /calf|shin|knee.*r|lower.*leg.*r/i, from: 26, to: 28, side: 'right' },
+            { regex: /foot|ankle.*r|right.*ankle/i, from: 28, to: 32, side: 'right' },
+        ];
+
+        function initPoseTracking() {
+            if (isTracking) {
+                stopPoseTracking();
+                return;
+            }
+            if (!window.Pose) {
+                alert('MediaPipe not loaded yet. Please wait or check your connection.');
+                return;
+            }
+            poseDetector = new Pose({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+            });
+            poseDetector.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                enableSegmentation: false,
+                smoothSegmentation: false,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+            poseDetector.onResults(onPoseResults);
+
+            navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: 640, height: 480 }
+            }).then(stream => {
+                videoElement.srcObject = stream;
+                videoElement.style.display = 'block';
+                videoElement.play();
+                isTracking = true;
+                cameraBtn.textContent = '⏹ Stop Tracking';
+                cameraBtn.classList.add('recording');
+                statusPill.textContent = 'Camera Tracking — Pose mirroring active';
+                processVideoFrame();
+            }).catch(err => {
+                console.error('Camera error:', err);
+                alert('Could not access back camera. Make sure you gave permission and are on HTTPS or localhost.');
+            });
+        }
+
+        function stopPoseTracking() {
+            isTracking = false;
+            if (videoElement.srcObject) {
+                videoElement.srcObject.getTracks().forEach(t => t.stop());
+                videoElement.srcObject = null;
+            }
+            videoElement.style.display = 'none';
+            cameraBtn.textContent = '📷 Track Pose';
+            cameraBtn.classList.remove('recording');
+            statusPill.textContent = 'View Mode';
+            setMode(currentMode);
+        }
+
+        cameraBtn.addEventListener('click', initPoseTracking);
+
+        async function processVideoFrame() {
+            if (!isTracking || !poseDetector) return;
+            await poseDetector.send({ image: videoElement });
+            requestAnimationFrame(processVideoFrame);
+        }
+
+        function onPoseResults(results) {
+            if (!results.poseLandmarks || allBones.length === 0) return;
+            const lm = results.poseLandmarks;
+            smoothedLandmarks = lm;
+            applyPoseToSkeleton(lm);
+        }
+
+        function applyPoseToSkeleton(landmarks) {
+            // Build a map of bone names to bones for quick lookup
+            const boneByPattern = new Map();
+            allBones.forEach(bone => {
+                const name = bone.name.toLowerCase();
+                for (const entry of MEDIAPIPE_BONE_MAP) {
+                    if (entry.regex.test(name)) {
+                        if (!boneByPattern.has(entry.regex.source)) {
+                            boneByPattern.set(entry.regex.source, bone);
+                        }
+                    }
+                }
+            });
+
+            for (const entry of MEDIAPIPE_BONE_MAP) {
+                const bone = boneByPattern.get(entry.regex.source);
+                if (!bone) continue;
+                const a = landmarks[entry.from];
+                const b = landmarks[entry.to];
+                if (!a || !b || a.visibility < 0.3 || b.visibility < 0.3) continue;
+
+                // Detected direction in world-aligned space
+                // MediaPipe: x right [0,1], y down [0,1], z depth (negative toward camera)
+                const detectedDir = new THREE.Vector3(
+                    b.x - a.x,
+                    -(b.y - a.y), // flip Y so up is positive
+                    -(b.z - a.z)  // flip Z so forward is positive (toward viewer)
+                ).normalize();
+
+                // Get rest direction in bone's local space
+                const childBone = bone.children.find(c => c.isBone || c.type === 'Bone');
+                if (!childBone) continue;
+                const restDir = childBone.position.clone();
+                if (restDir.length() < 0.001) continue;
+                restDir.normalize();
+
+                // Transform detected direction into bone's parent space, then into bone local space
+                const parent = bone.parent;
+                const parentWorldQ = new THREE.Quaternion();
+                parent.getWorldQuaternion(parentWorldQ);
+                const detectedInParent = detectedDir.clone().applyQuaternion(parentWorldQ.clone().invert());
+
+                // Now account for bone's rest rotation to get into bone's local space
+                const restQ = originalBoneQuaternions.get(bone.uuid);
+                const detectedInBoneLocal = detectedInParent.clone().applyQuaternion(restQ.clone().invert());
+
+                // Compute rotation from restDir to detectedInBoneLocal
+                const q = new THREE.Quaternion().setFromUnitVectors(restDir, detectedInBoneLocal);
+                bone.quaternion.copy(restQ).multiply(q);
+            }
+
+            if (loadedModel) loadedModel.updateMatrixWorld(true);
+        }
+
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = clock.getDelta();
+
+            if (loadedModel) {
+                updateBoneHelpers();
+                updateJiggleHelpers();
+            }
+
+            // Breast jiggle physics
+            jellyParts.forEach(part => {
+                const { mesh, originalPositions, currentPositions, velocities, active } = part;
+                const posAttr = mesh.geometry.attributes.position;
+                if (!active) {
+                    let dirty = false;
+                    for (let i = 0; i < posAttr.count; i++) {
+                        const idx = i*3;
+                        const dx = originalPositions[idx] - currentPositions[idx];
+                        const dy = originalPositions[idx+1] - currentPositions[idx+1];
+                        const dz = originalPositions[idx+2] - currentPositions[idx+2];
+                        if (Math.abs(dx)>0.001 || Math.abs(dy)>0.001 || Math.abs(dz)>0.001) {
+                            velocities[idx] = dx * 0.08;
+                            velocities[idx+1] = dy * 0.08;
+                            velocities[idx+2] = dz * 0.08;
+                            currentPositions[idx] += velocities[idx];
+                            currentPositions[idx+1] += velocities[idx+1];
+                            currentPositions[idx+2] += velocities[idx+2];
+                            dirty = true;
+                        } else {
+                            velocities[idx]=velocities[idx+1]=velocities[idx+2]=0;
+                            currentPositions[idx]=originalPositions[idx];
+                            currentPositions[idx+1]=originalPositions[idx+1];
+                            currentPositions[idx+2]=originalPositions[idx+2];
+                        }
+                    }
+                    if (dirty) { posAttr.needsUpdate = true; mesh.geometry.computeVertexNormals(); }
+                    return;
+                }
+
+                let stiffness = part.customStiffness ?? 0.025;
+                let damping = part.customDamping ?? 0.88;
+                let gravity = part.customGravity ?? -0.002;
+                let nonlinearMult = 2.0;
+
+                for (let i = 0; i < posAttr.count; i++) {
+                    const idx = i*3;
+                    const dx = originalPositions[idx] - currentPositions[idx];
+                    const dy = originalPositions[idx+1] - currentPositions[idx+1];
+                    const dz = originalPositions[idx+2] - currentPositions[idx+2];
+                    const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                    const nonlinear = 1.0 + dist * nonlinearMult;
+
+                    let fx = dx * stiffness * nonlinear;
+                    let fy = dy * stiffness * nonlinear + gravity;
+                    let fz = dz * stiffness * nonlinear;
+
+                    velocities[idx] = (velocities[idx] + fx) * damping;
+                    velocities[idx+1] = (velocities[idx+1] + fy) * damping;
+                    velocities[idx+2] = (velocities[idx+2] + fz) * damping;
+
+                    currentPositions[idx] += velocities[idx];
+                    currentPositions[idx+1] += velocities[idx+1];
+                    currentPositions[idx+2] += velocities[idx+2];
+                }
+                posAttr.needsUpdate = true;
+                mesh.geometry.computeVertexNormals();
+            });
+
+            if (currentMode === 'view' || currentMode === 'squish' || currentMode === 'zones') {
+                controls.update();
+            }
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
